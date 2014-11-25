@@ -8,12 +8,12 @@
     "type": "git",
     "url": "git://github.com/naholyr/node-ftp-server.git"
   },
-  "main": "lib/ftpd.js",
+  "main": "index.js",
   "engines": {
     "node": ">= 0.4"
   },
   "dependencies": {},
-  "devDependencies": {},
+  "devDependencies": {"colors": ""},
   "scripts": {
     "test": "node test"
   },
