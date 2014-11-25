@@ -8,16 +8,12 @@ It's currently highly experimental and could crash anytime. It could become a re
 
 ## Install
 
-```bash
-# Using NPM
-npm install ftp-server
-```
 
-Or from source:
+From source:
 
 ```bash
 # Install from sources...
-git clone git://github.com/naholyr/node-ftp-server.git ftp-server
+git clone git://github.com/nickdoth/node-ftp-server.git ftp-server
 cd ftp-server
 npm link
 
@@ -41,10 +37,12 @@ Example: Simply serve a given directory:
 
 ```javascript
 var ftpd = require('ftp-server')
+var server = ftpd.createServer()
 // Path to your FTP root
-ftpd.fsOptions.root = '/path/to/ftp-root'
+var staticFs = ftpd.wares.staticFs({ root: '/path/to/ftp-root' })
+server.use(staticFs)
 // Start listening on port 21 (you need to be root for ports < 1024)
-ftpd.listen(21)
+server.listen(21)
 ```
 
 ## Extend server

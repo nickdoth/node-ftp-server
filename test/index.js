@@ -1,15 +1,17 @@
 ﻿var ftp = require('..')
 
-var simpleFs = ftp.wares.staticFs({ root: './data' })
-
 var server = ftp.createServer()
+var staticFs = ftp.wares.staticFs({ root: './data' })
+
 
 server.use(ftp.wares.userControl)
 server.use(ftp.wares.epsv)
-server.use(simpleFs)
+server.use(staticFs)
 
 
 server.on('connection', function (socket) {
+  var isLogin = false
+
   socket.on('user:loginStart', function (username, success, fail) {
     if(username === 'nick') {
       success()
@@ -20,7 +22,7 @@ server.on('connection', function (socket) {
   })
 
   socket.on('user:password', function (passwd, success, fail) {
-    if (passwd === '10086') {
+    if (passwd === '000000') {
       isLogin = true
       success()
     }
@@ -29,7 +31,7 @@ server.on('connection', function (socket) {
     }
   })
 
-  socket.on('user:requestPermittion', function (command, args, permit, deny) {
+  socket.on('user:requestPermission', function (command, args, permit, deny) {
     if (command === 'DELE' || command === 'STOR') {
       deny()
     }
