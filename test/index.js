@@ -1,8 +1,9 @@
 ﻿var ftp = require('..')
 
 var server = ftp.createServer()
-var staticFs = ftp.wares.staticFs({ root: 'E:/Lib_4096886_outline' })
-
+// var staticFs = ftp.wares.staticFs({ root: 'E:/Lib_4096886_outline' })
+var staticFs = ftp.wares.staticFs({ root: 'C:/' })
+// var staticFs = ftp.wares.staticFs({ root: '/home/nick' })
 
 server.use(ftp.wares.userControl)
 server.use(ftp.wares.epsv)
@@ -45,4 +46,4 @@ server.on('connection', function (socket) {
   })
 })
 
-server.listen(21)
+server.listen(21, '192.168.24.1')
