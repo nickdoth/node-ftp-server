@@ -1,4 +1,4 @@
-import ftpFs = require("./fs");
+import { Filesystem } from './fs';
 export interface Signal {
     (): void;
 }
@@ -7,6 +7,6 @@ export interface FtpUser {
     requestPermission(cmd: string, args: any, permit: Signal, deny: Signal): any;
     checkUsername(name: string, success: Signal, fail: Signal): any;
     checkPassword(pass: string, success: Signal, fail: Signal): any;
-    getFilesystem(): ftpFs.Filesystem;
+    getFilesystem(): Filesystem;
 }
 export declare function enterUserControl(): void;

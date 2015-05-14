@@ -1,12 +1,14 @@
-class CommandFilter {
+import { FtpConnection } from './ftpd';
 
-    filters: Function[] = [];
+export default class CommandFilter {
+
+    filters: Array<Function> = [];
 
     add(filter: Function) {
     	this.filters.push(filter);
     }
 
-    apply(conn, command, args, callback) {
+    apply(conn: FtpConnection, command: string, args: string[], callback: (err?: any) => void) {
     	var filters = this.filters;
     	var len = filters.length;
     	var count = 0;
@@ -33,4 +35,3 @@ class CommandFilter {
 
 }
 
-export = CommandFilter;

@@ -1,43 +1,40 @@
 /// <reference path="../typings/tsd.d.ts" />
-
-import path = require('path');
-import util = require('util');
-import net = require('net');
-import protocol = require('./protocol');
-import userControl = require('./user-control');
-import CommandFilter = require('./command-filter');
-import ftpFs = require('./fs');
-import Debug = require('debug');
+import * as net from 'net';
+import * as userControl from './user-control';
+import * as Debug from 'debug';
+import { Filesystem } from './fs';
+import { EventEmitter } from 'events';
+import { Commands, Messages, commands, messages } from './protocol';
+import CommandFilter from './command-filter';
+import EventedQueue from './evented-queue';
 import FtpUser = userControl.FtpUser;
-
-var EventedQueue = require('./evented-queue');
 
 /**
  * export interfaces
  */
-export interface Filesystem extends ftpFs.Filesystem {}
-export interface Commands extends protocol.Commands {}
-export interface Messages extends protocol.Messages {}
-export var StaticFilesystem = ftpFs.StaticFilesystem;
-export interface User extends FtpUser {}
+export { Filesystem, StaticFilesystem } from './fs';
+export { Commands, Messages, commands, messages } from './protocol';
+export { FtpUser } from './user-control';
+export { simple } from './simple';
 
-var commands = protocol.commands
-	, messages = protocol.messages
+// declare raw data type
+type Data = string|Buffer;
 
-var debug = require('debug')('ftpd')
+var debug = Debug('ftpd')
 
 /**
  * Ftp Server Class
  */
-export class FtpServer extends net.Server {
-	protocols = protocol;
-	extendedCommands: protocol.Commands = {};
+export class FtpServer extends EventEmitter {
+	extendedCommands: Commands = {};
 	feats: { [f: string]: boolean } = {
 		'UTF8': true,
-		'SIZE': true
+		'SIZE': true,
+		'REST': true
 	};
 
 	closing: boolean = false;
+	private internal: net.Server;
 
 	constructor(private options: FtpServerOptions) {
 		super();
@@ -45,7 +42,7 @@ export class FtpServer extends net.Server {
 
 		server.on('listening', function () {
 			debug('info', 'Server listening on ' +
-				server.address().address + ':' + server.address().port);
+				server.internal.address().address + ':' + server.internal.address().port);
 		});
 
 		/**
@@ -56,9 +53,9 @@ export class FtpServer extends net.Server {
 		})
 	}
 
-	close(callback?: Function): net.Server {
+	close(callback?: Function): FtpServer {
 		this.closing = true;
-		super.close(callback);
+		this.internal.close(callback);
 		return this;
 	}
 
@@ -66,32 +63,78 @@ export class FtpServer extends net.Server {
 		return new this.options.ftpUserCtor();
 	}
 
+	listen(port?:number, host?:string): FtpServer {
+		// Use net.Server as the default internal server
+		this.internal = net.createServer();
+		this.internal.on('connection', (...args) => this.emit('connection', ...args));
+		this.internal.on('listening', (...args) => this.emit('listening', ...args));
+		this.internal.on('error', (...args) => this.emit('error', ...args));
+		this.internal.on('close', (...args) => this.emit('close', ...args));
+		this.internal.listen(port, host);
+		return this;
+	}
+
 }
 
+
+
+
+/**
+ * Ftp Server Options
+ */
 export interface FtpServerOptions {
+    /**
+     * ftpUserCtor: {new(): FtpUser} A class implemented FtpUser
+     */
 	ftpUserCtor: {new(): FtpUser}
 }
 
 
 
 
+/**
+ * Ftp Connetion Session
+ */
+export class FtpConnection extends EventEmitter {
 
-
-
-
-export class FtpConnection {
-
+    /**
+     * Ftp user authentication abstration
+     */
 	user: FtpUser;
-	// socket: net.Socket;
+
+    /**
+     * Ftp filesystem abstration
+     */
 	fs: Filesystem;
-	// server: FtpServer;
+
+    /**
+     * Whether this connection is in passive mode or not
+     */
 	passive: boolean = false;
+
+    /**
+     * Stream seeking for REST command
+     */
+    seek: number = 0;
+
+    /**
+     * Command filter
+     */
 	filter: CommandFilter = new CommandFilter();
 
-	debug: Debug.Debugger;
+    /**
+     * Debug output
+     */
+    protected debug: Debug.Debugger;
+
+    /**
+     * Data transfer queue
+     */
+    transferQueue = new EventedQueue<Function>();
 	
 	constructor(public socket: net.Socket, public server: FtpServer) {
-		var debug = this.debug =  Debug('client' + socket.remoteAddress + ':' + socket.remotePort)
+        super();
+        var debug = this.debug = Debug(socket.remoteAddress + ':' + socket.remotePort);
 
 		/**
 		 * Configure client connection info
@@ -101,23 +144,20 @@ export class FtpConnection {
 		debug('info', 'request accepted')
 		socket.setTimeout(0)
 		socket.setNoDelay()
-		socket.setEncoding("binary");
 
-		this.passive = false;
-		// this.dataInfo = null;
 		this.user = server.createUser();
 		this.enterUserControl();
 
 		
 		setTimeout(() => {
-				debug('220!\n');
-				this.reply(220);
+			debug('220!\n');
+			this.reply(220);
 		}, 100);
 
 		/**
 		 * Received a command from socket
 		 */
-		socket.on('data', (chunk) => {
+		socket.on('data', (chunk: Data) => {
 			/**
 			 * If server is closing, refuse all commands
 			 */
@@ -127,7 +167,7 @@ export class FtpConnection {
 			/**
 			 * Parse received command and reply accordingly
 			 */
-			debug('info', '[Req] %s', chunk.toString().replace('\r\n', ''));
+			debug('info', '[Req]', chunk.toString().replace('\r\n', ''));
 			var parts = trim(chunk.toString()).split(" ")
 				, command = trim(parts[0]).toUpperCase()
 				, args = parts.slice(1, parts.length)
@@ -163,15 +203,18 @@ export class FtpConnection {
 	}
 
 	/**
-	 * Socket write logger
+	 * Write data to ftp command socket
 	 */
-	write(data: any, callback: Function) {
+	write(data: any, callback?: Function) {
 		this.socket.write(data, callback);
-		this.debug('info', '[Res] %s', data.toString().replace('\r\n', ''))
+		this.debug('info', '[Res]', data.toString().replace('\r\n', ''))
 	}
 		
 	/**
-	 * FTP reply method
+	 * Reply ftp command
+     * @param status Ftp status number
+     * @param message Reply message
+     * @param callback? Callback function
 	 */
 	reply(status: number, message?: string, callback?: Function) {
 		if (!message) message = messages[status.toString()] || 'No information'
@@ -179,15 +222,16 @@ export class FtpConnection {
 	}
 
 	/**
-	 * Socket end shortcut
+	 * Shortcut method of net.Socket.end()
+     * @see net.Socket
 	 */
 	end() {
 		return this.socket.end();
 	}
 
-	transferQueue: any = new EventedQueue();
+
 	/**
-	 * Data transfer
+	 * Data transfer handler
 	 */
 	dataTransfer(handle: Function) {
 		var conn = this;
@@ -206,7 +250,7 @@ export class FtpConnection {
 			handle.call(conn, this, finish(this))
 		}
 		// Will be unqueued in PASV command
-		debug('info', 'DataTransfer by', conn.passive? 'Passive Mode.' : 'Active Mode.')
+		this.debug('info', 'DataTransfer by', conn.passive? 'Passive Mode.' : 'Active Mode.')
 		if (conn.passive ||1) {
 			conn.transferQueue.push(execute)
 		}
@@ -229,7 +273,7 @@ export class FtpConnection {
 	/**
 	 * User control interface
 	 */
-	enterUserControl() {
+	protected enterUserControl() {
 		userControl.enterUserControl.call(this);
 	}
 
@@ -262,8 +306,8 @@ export class FtpConnection {
 }
 
 
-export function createServer(options) {
-		return new FtpServer(options);
+export function createServer(options: FtpServerOptions) {
+	return new FtpServer(options);
 }
 
 

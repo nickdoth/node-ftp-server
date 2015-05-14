@@ -1,7 +1,7 @@
 /// <reference path="../typings/tsd.d.ts" />
 import fs = require('fs');
 
-export = function (name: string, stats: any) {
+export default function (name: string, stats: any) {
     if(!stats) {
         stats = {
             isDirectory: function() {

@@ -1,7 +1,6 @@
-import protocol = require('./protocol');
-import ftpFs = require("./fs");
-
-var commands = protocol.commands;
+import { commands } from './protocol';
+import { Filesystem } from './fs';
+import { FtpConnection } from './ftpd';
 
 
 export interface Signal {
@@ -13,13 +12,13 @@ export interface FtpUser {
   requestPermission(cmd:string, args: any, permit: Signal, deny: Signal);
   checkUsername(name: string, success: Signal, fail: Signal);
   checkPassword(pass: string, success: Signal, fail: Signal);
-  getFilesystem(): ftpFs.Filesystem;
+  getFilesystem(): Filesystem;
 }
 
 export function enterUserControl() {
-  var conn = this
+  var conn: FtpConnection = this
 
-  conn.filter.add((conn, command, args, next) => {
+  conn.filter.add((conn: FtpConnection, command, args, next) => {
     if (['USER', 'PASS'].indexOf(command) > -1) {
       next();
       return;

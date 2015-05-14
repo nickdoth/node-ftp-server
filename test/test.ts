@@ -1,49 +1,21 @@
-import ftp = require('../lib/ftpd');
+// import {
+//   StaticFilesystem, FtpUser, createServer } from '../lib/ftpd';
 
-class SimpleUser implements ftp.User {
-    private logon: boolean = false;
+import { simple } from '../lib/ftpd';
 
-    getFilesystem() {
-        return new ftp.StaticFilesystem({ root: 'C:/' });
-    }
+type User = { pass: string, root: string };
+type Users = { [k: string]: User };
 
-    checkUsername(username, success, fail) {
-        if(username === 'nick') {
-          success()
-        }
-        else {
-          fail()
-        }
-    }
-
-    checkPassword(passwd, success, fail) {
-        if (passwd === '000000') {
-          this.logon = true
-          success()
-        }
-        else {
-          fail()
-        }
-    }
-
-    requestPermission(command, args, permit, deny) {
-        if (command === 'DELE' || command === 'STOR') {
-          deny()
-        }
-        else {
-          permit()
-        }
-    }
-
-    isLogin(yes, no) {
-        this.logon? yes() : no()
-    }
+var users: Users = {
+  'super': {
+    pass: Math.round(Math.random() * 1000000).toString(),
+    root: 'C:/'
+  },
+  'mnt': {
+    pass: '1008611',
+    root: 'C:/mnt'
+  }
 }
 
-var server = ftp.createServer({
-    ftpUserCtor: SimpleUser
-});
-
-server.feats['EPSV'] = false;
-
-server.listen(21, '192.168.24.1');
+var server = simple(users);
+console.log('super:', users['super'].pass);

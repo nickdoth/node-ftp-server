@@ -10,13 +10,15 @@ export interface Filesystem {
 
   list(dir: string, cb: (err, ...args) => any);
 
-  readFile(file: string, cb: (err, ...args) => any);
+  readFile(file: string, cb: (err, ...args) => any, seek?: number);
 
-  writeFile(file: string, cb: (err, ...args) => any);
+  writeFile(file: string, cb: (err, ...args) => any, seek?: number);
 
   unlink(file: string, cb: (err, ...args) => any);
 
   getSize(file: string, cb: (err, ...args) => any);
+
+  // seekSupport: boolean;
 
 }
 
@@ -74,8 +76,12 @@ export class StaticFilesystem implements Filesystem {
 
     console.log('list_path:', target)
     fs.stat(target, function (err1, stat) {
-      if (err1 || !stat.isDirectory()) {
+      if (err1) {
         cb(new Error('No such directory'), null);
+        return;
+      }
+      else if (!stat.isDirectory()) {
+        cb(null, { [path.basename(target)]: stat });
         return;
       }
       else {
@@ -85,8 +91,8 @@ export class StaticFilesystem implements Filesystem {
                 return;
               }
 
-              var resultArr = [], result = ''
-              var fileCount = list.length
+              var resultMap: { [f: string]: fs.Stats } = {};
+              var fileCount = list.length;
               
               if (fileCount === 0) {
                   cb(null, '\r\n')
@@ -102,18 +108,18 @@ export class StaticFilesystem implements Filesystem {
                       
                       if (err3) {
                           console.log(err3)
-                          // resultArr.push(outputFormatter(filename, null))
-                          resultArr[filename] = null
+                          // result.push(outputFormatter(filename, null))
+                          resultMap[filename] = null
                       }
                       else {
                           
-                          // resultArr.push(outputFormatter(filename, stat))
-                          resultArr[filename] = stat
+                          // result.push(outputFormatter(filename, stat))
+                          resultMap[filename] = stat
                       }
                       
                       if(fileCount === ++i) {
-                          // result = resultArr
-                          cb(null, resultArr)
+                          // result = resultMap
+                          cb(null, resultMap)
                       }
                       
                   })
@@ -126,7 +132,7 @@ export class StaticFilesystem implements Filesystem {
 
   }
 
-  readFile(file, cb) {
+  readFile(file: string, cb, seek?: number) {
     var self = this
       , target = this.resolve(file)
     
@@ -135,14 +141,25 @@ export class StaticFilesystem implements Filesystem {
       if (err || !stats.isFile()) {
         cb(new Error("No such file"), null)
       } else {
-        cb(null, fs.createReadStream(target))
+        if (seek) {
+          cb(null, fs.createReadStream(target, { start: seek }));
+        }
+        else {
+          cb(null, fs.createReadStream(target));
+        }
+        
       }
     })
 
   }
 
-  writeFile(file, cb) {
-    cb(null, fs.createWriteStream(this.resolve(file)))
+  writeFile(file: string, cb, seek?: number) {
+    if (seek) {
+      cb(null, fs.createWriteStream(this.resolve(file), { start: seek }));
+    }
+    else {
+      cb(null, fs.createWriteStream(this.resolve(file)));
+    }
   }
 
   unlink(file, cb) {

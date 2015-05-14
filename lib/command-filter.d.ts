@@ -1,6 +1,6 @@
-declare class CommandFilter {
-    filters: Function[];
+import { FtpConnection } from './ftpd';
+export default class CommandFilter {
+    filters: Array<Function>;
     add(filter: Function): void;
-    apply(conn: any, command: any, args: any, callback: any): void;
+    apply(conn: FtpConnection, command: string, args: string[], callback: (err?: any) => void): void;
 }
-export = CommandFilter;

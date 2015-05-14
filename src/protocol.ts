@@ -1,23 +1,28 @@
 /// <reference path="../typings/tsd.d.ts" />
 
-import path = require('path');
-import net = require('net');
-import unixLs = require('./unix-ls');
+import * as path from 'path';
+import * as net from 'net';
+import unixLs from './unix-ls';
+import { FtpConnection } from './ftpd';
+import { Readable, Writable } from 'stream';
+import * as Debug from 'debug';
+import passiveDT from './passiveDT';
 // import ftpd = require('ftpd');
 
+var streamDebug = Debug('stream');
 
 export interface Messages {
   [code: string]: string;
 }
 
 export interface Command {
-  (...args): any;
-  call(conn: any, ...args);
-  apply(conn: any, ...args);
+  (...args: string[]): any;
+  call(conn: FtpConnection, ...args);
+  apply(conn: FtpConnection, ...args);
 }
 
 export interface Commands {
-  [code: string]: Command;
+  [cmd: string]: Command;
 }
 
 /**
@@ -73,7 +78,11 @@ export var commands: Commands = {
    * Unsupported commands
    * They're specifically listed here as a roadmap, but any unexisting command will reply with 202 Not supported
    */
-  "ABOR": function () { this.reply(202) }, // Abort an active file transfer.
+  "ABOR": function () {
+    // this.reply(202);
+    var conn: FtpConnection = this;
+    conn.emit('data-abort');
+  }, // Abort an active file transfer.
   "ACCT": function () { this.reply(202) }, // Account information
   "ADAT": function () { this.reply(202) }, // Authentication/Security Data (RFC 2228)
   "ALLO": function () { this.reply(202) }, // Allocate sufficient disk space to receive a file.
@@ -83,7 +92,7 @@ export var commands: Commands = {
   "CONF": function () { this.reply(202) }, // Confidentiality Protection Command (RFC 697)
   "ENC":  function () { this.reply(202) }, // Privacy Protected Channel (RFC 2228)
   "EPRT": function () { this.reply(202) }, // Specifies an extended address and port to which the server should connect. (RFC 2428)
-  "EPSV": function () { this.reply(202) }, // Enter extended passive mode. (RFC 2428)
+  // "EPSV": function () { this.reply(202) }, // Enter extended passive mode. (RFC 2428)
   "HELP": function () { this.reply(202) }, // Returns usage documentation on a command if specified, else a general help document is returned.
   "LANG": function () { this.reply(202) }, // Language Negotiation (RFC 2640)
   "LPRT": function () { this.reply(202) }, // Specifies a long address and port to which the server should connect. (RFC 1639)
@@ -108,15 +117,15 @@ export var commands: Commands = {
    * General info
    */
   "FEAT": function () {
-    var socket = this
-    var features = socket.server.feats
-    socket.write('211-Extensions supported\r\n')
+    var conn: FtpConnection = this
+    var features = conn.server.feats
+    conn.write('211-Extensions supported\r\n')
     for(var n in features) {
       if(features.hasOwnProperty(n) && features[n]) {
-        socket.write(' ' + n + '\r\n')
+        conn.write(' ' + n + '\r\n')
       }
     }
-    socket.reply(211, 'End')
+    conn.reply(211, 'End')
   },
   "SYST": function () {
     this.reply(215, 'UNIX Type: L8')
@@ -149,11 +158,12 @@ export var commands: Commands = {
    * Change data encoding
    */
   "TYPE": function (dataEncoding) {
+    var conn: FtpConnection = this;
     if (dataEncoding == "A" || dataEncoding == "I") {
-      this.dataEncoding = (dataEncoding == "A") ? "utf-8" : "binary"
-      this.reply(200)
+      // conn.socket.setEncoding((dataEncoding == "A") ? "utf-8" : "binary");
+      conn.reply(200)
     } else {
-      this.reply(501)
+      conn.reply(501)
     }
   },
   /**
@@ -171,69 +181,13 @@ export var commands: Commands = {
    * Passive mode
    */
   "PASV": function () { // Enter passive mode
-    var conn = this
-      , dataServer = net.createServer()
-    conn.passive = true
-    dataServer.on('connection', function (dataSocket) {
-      dataSocket.setEncoding(conn.socket.dataEncoding)
-      console.log('客户端请求数据传输');
-      // setTimeout(function () {
-        // Unqueue method that has been queued previously
-        // if (socket.dataTransfer.queue.length) {
-        //   socket.dataTransfer.queue.shift().call(dataSocket)
-        // } else {
-        //   console.log('Err: [似乎]已到达队尾')
-        //   //[mod] TODO: It works when I place this into the timer, but I don't know why..
-        //   // setTimeout(function() {
-        //   socket.dataTransfer.queue.once('unempty', function() {
-        //     var execute = socket.dataTransfer.queue.shift()
-        //     console.log(execute);
-        //     execute && execute.call(dataSocket)
-        //   })
-        //   // }, 100);
-        //   //dataSocket.emit('error', {"code": 421})
-        //   //socket.end()
-        // }
-      // }, 0);
-
-      /**
-       * 通常, 客户端在PASV请求得到回应后会立即尝试与服务器建立FTP-DATA连接;
-       * 此时由于客户端还没有请求具体的数据传输指令(如LIST和RETR), 因此数据传输队列为空.
-       * 所以在connection事件emit后, 如果队列为空(通常如此...), 则等待事件化的队列触发push(入队)事件, 然后再执行具体的传输操作.
-       */
-
-      // 客户端在发送RETR等指令**之后**请求数据传输, 立即执行队列中的指令.
-      var execute = conn.transferQueue.shift()
-      if(execute) {
-        execute.call(dataSocket)
-      }
-      // 客户端在发送RETR等指令**之前**请求数据传输, 等待指令进入队列.
-      else {
-        conn.transferQueue.once('push', function() {
-          execute = conn.transferQueue.shift()
-          execute && execute.call(dataSocket)
-        })
-      }
-
-      dataSocket.on('close', function () {
-        console.log('data channel closed.');
-        conn.reply(this.error ? 426 : 226)
-        dataServer.close()
-      }).on('error', function (err) {
-        console.log('dataSocket error:',err)
-        this.error = err //err.code || 
-        conn.reply(500, err.toString())
-      })
-    }).on('listening', function () {
-      var port = this.address().port
-        , host = conn.socket.localAddress
-      // socket.dataInfo = { "host": host, "port": port }
-      conn.reply(227, 'PASV OK (' + host.split('.').join(',') + ',' + Math.round(port / 256) + ',' + (port % 256) + ')')
-      //conn.reply(227, 'PASV OK (192,168,1,23,' + parseInt(port/256,10) + ',' + (port%256) + ')')
-      //conn.reply(200);
-    });
-
-    dataServer.listen(null);
+    passiveDT(this, false);
+  },
+  /**
+   * Extended Passive mode
+   */
+  "EPSV": function () { // Enter passive mode
+    passiveDT(this, true);
   },
   /**
    * TODO Active mode
@@ -321,36 +275,37 @@ export var commands: Commands = {
     })
   },
   "RETR": function (file) {
-    var socket = this
-    socket.dataTransfer(function (dataSocket, finish) {
-      socket.fs.readFile(file, function (err, stream) {
+    var conn: FtpConnection = this
+    conn.dataTransfer(function (dataSocket: net.Socket, finish) {
+      conn.fs.readFile(file, function (err, stream: Readable) {
         if(err) {
-          socket.reply(431, err.toString())
+          conn.reply(431, err.toString())
           return
         }
-
-        stream.pipe(dataSocket)
-      })
+        streamDebug('Now RETR:', file);
+        stream.pipe(dataSocket);
+      }, conn.seek)
     })
   },
   //[mod] 新加SIZE指令支持
   "SIZE": function (file) {
-    var socket = this;
-    socket.fs.getSize(file, function (err, size) {
+    var conn = this;
+    conn.fs.getSize(file, function (err, size) {
         console.log('file_size', size);
+        streamDebug('SIZE', size);
         if(err) {
-            socket.reply(450);
+            conn.reply(450);
         } else {
-            socket.reply(213, size);
+            conn.reply(213, size);
         }
     });
   },
   "STOR": function (file) {
-    var socket = this
-    socket.dataTransfer(function (dataSocket, finish) {
-      socket.fs.writeFile(file, function (err, stream) {
+    var conn = this
+    conn.dataTransfer(function (dataSocket, finish) {
+      conn.fs.writeFile(file, function (err, stream) {
         if(err) {
-          socket.reply(413, err.toString())
+          conn.reply(413, err.toString())
           return
         }
 
@@ -360,9 +315,9 @@ export var commands: Commands = {
   },
   "DELE": function (file) {
     this.reply(202)
-    var socket = this
-    socket.fs.unlink(file, function () {
-      socket.reply(250)
+    var conn = this
+    conn.fs.unlink(file, function () {
+      conn.reply(250)
     })
   },
   "RNFR": function (name) {
@@ -387,10 +342,11 @@ export var commands: Commands = {
    * Allow restart interrupted transfer
    */
   "REST": function (start) {
-    this.reply(202)
+    // this.reply(202)
     // Restart transfer from the specified point.
-    /*socket.totsize = parseInt(command[1].trim());
-    socket.send("350 Rest supported. Restarting at " + socket.totsize + "\r\n");*/
+    streamDebug('REST', start);
+    this.seek = parseInt(start.trim());
+    this.reply(350, "Rest supported. Restarting at " + this.seek + "\r\n");
   },
   /**
    * Disconnection
@@ -402,3 +358,7 @@ export var commands: Commands = {
 }
 
 
+// function _parseInt(val: any) {
+//   console.log(val, parseInt(val), Math.round(val));
+//   return parseInt(val);
+// }

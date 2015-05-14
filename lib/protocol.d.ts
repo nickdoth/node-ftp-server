@@ -1,14 +1,15 @@
 /// <reference path="../typings/tsd.d.ts" />
+import { FtpConnection } from './ftpd';
 export interface Messages {
     [code: string]: string;
 }
 export interface Command {
-    (...args: any[]): any;
-    call(conn: any, ...args: any[]): any;
-    apply(conn: any, ...args: any[]): any;
+    (...args: string[]): any;
+    call(conn: FtpConnection, ...args: any[]): any;
+    apply(conn: FtpConnection, ...args: any[]): any;
 }
 export interface Commands {
-    [code: string]: Command;
+    [cmd: string]: Command;
 }
 /**
  * Standard messages for status (RFC 959)

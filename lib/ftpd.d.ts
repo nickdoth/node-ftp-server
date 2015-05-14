@@ -1,73 +1,106 @@
 /// <reference path="../typings/tsd.d.ts" />
-import net = require('net');
-import protocol = require('./protocol');
-import userControl = require('./user-control');
-import CommandFilter = require('./command-filter');
-import ftpFs = require('./fs');
-import Debug = require('debug');
+import * as net from 'net';
+import * as userControl from './user-control';
+import * as Debug from 'debug';
+import { Filesystem } from './fs';
+import { EventEmitter } from 'events';
+import { Commands } from './protocol';
+import CommandFilter from './command-filter';
+import EventedQueue from './evented-queue';
 import FtpUser = userControl.FtpUser;
 /**
  * export interfaces
  */
-export interface Filesystem extends ftpFs.Filesystem {
-}
-export interface Commands extends protocol.Commands {
-}
-export interface Messages extends protocol.Messages {
-}
-export declare var StaticFilesystem: typeof ftpFs.StaticFilesystem;
-export interface User extends FtpUser {
-}
+export { Filesystem, StaticFilesystem } from './fs';
+export { Commands, Messages, commands, messages } from './protocol';
+export { FtpUser } from './user-control';
+export { simple } from './simple';
 /**
  * Ftp Server Class
  */
-export declare class FtpServer extends net.Server {
+export declare class FtpServer extends EventEmitter {
     private options;
-    protocols: typeof protocol;
-    extendedCommands: protocol.Commands;
+    extendedCommands: Commands;
     feats: {
         [f: string]: boolean;
     };
     closing: boolean;
+    private internal;
     constructor(options: FtpServerOptions);
-    close(callback?: Function): net.Server;
+    close(callback?: Function): FtpServer;
     createUser(): FtpUser;
+    listen(port?: number, host?: string): FtpServer;
 }
+/**
+ * Ftp Server Options
+ */
 export interface FtpServerOptions {
+    /**
+     * ftpUserCtor: {new(): FtpUser} A class implemented FtpUser
+     */
     ftpUserCtor: {
         new (): FtpUser;
     };
 }
-export declare class FtpConnection {
+/**
+ * Ftp Connetion Session
+ */
+export declare class FtpConnection extends EventEmitter {
     socket: net.Socket;
     server: FtpServer;
+    /**
+     * Ftp user authentication abstration
+     */
     user: FtpUser;
+    /**
+     * Ftp filesystem abstration
+     */
     fs: Filesystem;
+    /**
+     * Whether this connection is in passive mode or not
+     */
     passive: boolean;
+    /**
+     * Stream seeking for REST command
+     */
+    seek: number;
+    /**
+     * Command filter
+     */
     filter: CommandFilter;
-    debug: Debug.Debugger;
+    /**
+     * Debug output
+     */
+    protected debug: Debug.Debugger;
+    /**
+     * Data transfer queue
+     */
+    transferQueue: EventedQueue<Function>;
     constructor(socket: net.Socket, server: FtpServer);
     /**
-     * Socket write logger
+     * Write data to ftp command socket
      */
-    write(data: any, callback: Function): void;
+    write(data: any, callback?: Function): void;
     /**
-     * FTP reply method
+     * Reply ftp command
+     * @param status Ftp status number
+     * @param message Reply message
+     * @param callback? Callback function
      */
     reply(status: number, message?: string, callback?: Function): void;
     /**
-     * Socket end shortcut
+     * Shortcut method of net.Socket.end()
+     * @see net.Socket
      */
     end(): void;
-    transferQueue: any;
     /**
-     * Data transfer
+     * Data transfer handler
      */
     dataTransfer(handle: Function): void;
     /**
      * User control interface
      */
-    enterUserControl(): void;
+    protected enterUserControl(): void;
     /**
      * User reply helpers
      */
@@ -77,4 +110,4 @@ export declare class FtpConnection {
     passOk(): void;
     authFail(): void;
 }
-export declare function createServer(options: any): FtpServer;
+export declare function createServer(options: FtpServerOptions): FtpServer;
